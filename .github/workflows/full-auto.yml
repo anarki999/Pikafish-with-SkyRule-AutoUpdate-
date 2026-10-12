@@ -1,0 +1,53 @@
+name: Full Auto Update Rule Sets
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: "!contains(github.event.head_commit.message, '[skip full-auto]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}  # <--- 使用你的 PAT 認證 Checkout & Push
+
+      - run: |
+          git remote add upstream https://github.com/official-pikafish/Pikafish.git || true
+          git fetch upstream --prune --tags
+          git fetch upstream master
+          git checkout master
+          
+          # 備份檔案
+          cp -r .github /tmp/.github || true
+          cp -r patches /tmp/patches || true
+          
+          git reset --hard upstream/master
+          
+          # 安全還原檔案
+          rm -rf patches .github
+          cp -r /tmp/patches patches || true
+          cp -r /tmp/.github .github || true
+          rm -rf /tmp/patches /tmp/.github
+          
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          ls -l patches/ || true
+          ls -l .github/workflows/ || true
+          
+          # 套用 Patches
+          for p in patches/*.patch; do
+            [ -f "$p" ] || continue
+            echo "Applying $p"
+            git am -3 "$p" || (git am --abort; patch -p1 --merge < "$p" && git add -A && git commit -m "apply $p [skip full-auto]")
+          done
+      - run: |
+          git add .github/workflows/ patches/ || true
+          git diff --staged --quiet || git commit -m "restore workflows [skip full-auto]"
+          git push origin master --force
